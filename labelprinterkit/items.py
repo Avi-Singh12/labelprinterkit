@@ -3,7 +3,7 @@ Objects that can be placed in a label template
 """
 
 from PIL import Image, ImageDraw, ImageFont
-
+import qrcode
 
 class Text:
     """A simple text item"""
@@ -29,3 +29,18 @@ class Text:
         draw = ImageDraw.Draw(image)
         draw.text((self.pad_left, self.pad_top), text, "black", self.font)
         return image
+
+class QRCode:
+    """A simple QRCode item"""
+    def __init__(self, version=1, error_correction=qrcode.constants.ERROR_CORRECT_L, box_size=1, border=0) -> None:
+        self.qr = qrcode.QRCode(
+            version=version,
+            error_correction=error_correction,
+            box_size=box_size,
+            border=border,
+        )
+
+    def render(self, data):
+        self.qr.add_data(data)
+
+        return self.qr.make_image(fill_color="black", back_color="white")

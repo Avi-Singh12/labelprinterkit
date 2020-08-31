@@ -17,7 +17,7 @@ class Label:
 
     >>> class MyLabel(Label):
     ...     items = [
-    ...         Text(), Text()
+    ...         [Text(), Text()]
     ...     ]
     >>> l = MyLabel("text1", "text2")
     >>> printer.print(l)
@@ -73,12 +73,8 @@ class Label:
             pos[1] += max(i.size[1] for i in line)
 
         xdim, ydim = img.size
-        print("presize", xdim, ydim, height)
         xdim = round((height / ydim) * xdim)
 
-        print("calcsize", xdim, ydim)
         img = img.resize((xdim, height))
 
         return img
-
-# print("".join(f"{x:08b}".replace("0", " ") for x in bytes(i)))

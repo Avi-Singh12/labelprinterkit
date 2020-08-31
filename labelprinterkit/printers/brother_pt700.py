@@ -119,7 +119,6 @@ def encode_line(bitmap_line: bytes, tape_info: TapeInfo) -> bytes:
     # of 8, so we need to convert our line into an int, shift it over by the
     # left margin and convert it to back again, padding to 16 bytes.
 
-    # print("".join(f"{x:08b}".replace("0", " ") for x in bytes(bitmap_line)))
     line_int = int.from_bytes(bitmap_line, byteorder='big')
     line_int <<= tape_info.rmargin
     padded = line_int.to_bytes(16, byteorder='big')
@@ -128,7 +127,7 @@ def encode_line(bitmap_line: bytes, tape_info: TapeInfo) -> bytes:
     compressed = packbits.encode(padded)
     logger.debug("original bitmap: %s", bitmap_line)
     logger.debug("padded bitmap %s", padded)
-    logger.debug("packbi compressed %s", compressed)
+    logger.debug("packbits compressed %s", compressed)
     # <h: big endian short (2 bytes)
     prefix = struct.pack("<H", len(compressed))
 
@@ -169,22 +168,20 @@ class Status(BaseStatus):
 
 
 class P700(BasePrinter):
-    """Printer Class for the Brother P-Touch P700/PT-700 Printer
-
-    Theoretically supports the H500 and E500 too, but this is untested"""
+    """Printer Class for the Brother P-Touch P700/PT-700 Printer"""
     DPI = (180, 180)
 
     def connect(self) -> None:
         """Connect to Printer"""
         self.io.write(b'\x00' * 100)
-        self.io.write(b'\x1b@')
+        self.io.write(b'\x1b\x40')
 
         logger.info("connected")
 
     def get_status(self) -> Status:
         """get status of the printer as ``Status`` object"""
         with self.io.lock:
-            self.io.write(b'\x1BiS')
+            self.io.write(b'\x1B\x69\x53')
             data = self.io.read(32)
 
             if not data:
@@ -220,55 +217,46 @@ class P700(BasePrinter):
         logger.info("label output size: %s", img.size)
         logger.info("tape info: %s", status.tape_info)
 
-        # img.show()
+        img_bytes = img.tobytes()
 
         with self.io.lock:
             self._raw_print(
-                status, batch_iter_bytes(img.tobytes(), ceil(img.size[0] / 8)))
+                status, batch_iter_bytes(img_bytes, ceil(img.size[0] / 8)))
+
+        # wait for label to finish printing
+        time.sleep(len(img_bytes)/1000 if len(img_bytes)/1000 > 5 else 5)
+
         return self.get_status()
 
     def _dummy_print(self, status: Status, document: Iterable[bytes]) -> None:
         for line in document:
-            # print(b'G' + encode_line(line, status.tape_info))
             encode_line(line, status.tape_info)
 
     def _raw_print(self, status: Status, document: Iterable[bytes]) -> None:
         logger.info("starting print")
 
-        # raster mode
-        self.io.write(b'\x1Bia\x01')
-        self._debug_status()
+        self.connect()
 
-        # Compression mode
-        self.io.write(b'M\x02')
-        self._debug_status()
+        # raster mode
+        self.io.write(b'\x1B\x69\x69\x01')
 
         # Various mode
-        # self.io.write(b'\x1biM\x20')  # 20: 6th bit
-        self._debug_status()
+        self.io.write(b'\x1B\x69\x4D\x40')
 
         # Advanced mode
-        self.io.write(b'\x1biK\x08')
-        self._debug_status()
+        self.io.write(b'\x1B\x69\x4B\x08')
 
         # margin
-        self.io.write(b'\x1bid\x0E\x00')
-        self._debug_status()
+        self.io.write(b'\x1B\x69\x64\x0E\x00')
 
-        # print information
-        # self.io.write(b'\x1Biz [...] \x00')
-
-        self.io.write(b'Z')
-
-        # raster line
+        # Compression mode
+        self.io.write(b'\x4D\x02')
 
         for line in document:
             self.io.write(b'G' + encode_line(line, status.tape_info))
 
-        self.io.write(b'Z')
+        self.io.write(b'\x5A')
 
         # end page
-        self._debug_status()
         self.io.write(b'\x1A')
-        self._debug_status()
         logger.info("end of page")
