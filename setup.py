@@ -5,7 +5,7 @@ with open('README.md', 'r') as readme:
 
 setup(
     name="labelprinterkit-avis",
-    version="1.0.0",
+    version="0.0.4",
     description="A library for creating and printing labels",
     use_scm_version=True,
     long_description=README_TEXT,
@@ -28,9 +28,6 @@ setup(
         'pyserial',
         'libusb',
         'qrcode'
-    ],
-    setup_requires=[
-        'setuptools_scm'
     ],
     python_requires='>=3.4'
 )
