@@ -14,8 +14,11 @@ def is_usb_printer(dev):
 class PyUSBBackend():
     def __init__(self, dev):
         self.dev = dev
-        if self.dev.is_kernel_driver_active(0):
-            self.dev.detach_kernel_driver(0)
+        try:
+            if self.dev.is_kernel_driver_active(0):
+                self.dev.detach_kernel_driver(0)
+        except NotImplemented:
+            pass
         self.lock = threading.Lock()
 
     @classmethod
