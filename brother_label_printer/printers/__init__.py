@@ -54,7 +54,7 @@ class BasePrinter(ABC):
         xpixels, ypixels = label.size
         return (xpixels / xdpi) * 2.54, (ypixels / ydpi) * 2.54
 
-    def print_label(self, label: Label) -> BaseStatus:
+    def print_label(self, label: Label, copies=1) -> BaseStatus:
         """Print the label"""
 
     @abstractmethod
