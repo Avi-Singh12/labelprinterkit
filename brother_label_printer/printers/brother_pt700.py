@@ -233,7 +233,7 @@ class P700(BasePrinter):
 
         with self.io.lock:
             self._raw_print(
-                self.status, create_copies(img_bytes, ceil(img.size[0] / 8), 2))
+                self.status, create_copies(img_bytes, ceil(img.size[0] / 8), copies))
 
         return self.get_status()
 
