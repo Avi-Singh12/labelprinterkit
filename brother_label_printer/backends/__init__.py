@@ -17,7 +17,7 @@ class PyUSBBackend():
         try:
             if self.dev.is_kernel_driver_active(0):
                 self.dev.detach_kernel_driver(0)
-        except NotImplemented:
+        except NotImplementedError:
             pass
         self.lock = threading.Lock()
 

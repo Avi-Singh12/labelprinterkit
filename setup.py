@@ -28,5 +28,5 @@ setup(
         'pyserial',
         'qrcode'
     ],
-    python_requires='>=3.4'
+    python_requires='>=3.9'
 )
