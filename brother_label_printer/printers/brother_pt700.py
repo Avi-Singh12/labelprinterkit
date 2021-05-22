@@ -275,7 +275,6 @@ class P700(BasePrinter):
 
                 if i+1 < len(documents):
                     self.next_page()
-                    print("next page")
                     end = time.time() + 20
                     while True:
                         if self.status.data.get('status_type') == 6 and self.status.data.get('phase_type') == 0:
