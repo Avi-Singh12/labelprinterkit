@@ -4,7 +4,7 @@ with open('README.md', 'r') as readme:
     README_TEXT = readme.read()
 
 setup(
-    name="labelprinterkit-avis",
+    name="brother-label-printer",
     version="0.0.5",
     description="A library for creating and printing labels",
     use_scm_version=True,
@@ -28,5 +28,5 @@ setup(
         'pyserial',
         'qrcode'
     ],
-    python_requires='>=3.4'
+    python_requires='>=3.9'
 )

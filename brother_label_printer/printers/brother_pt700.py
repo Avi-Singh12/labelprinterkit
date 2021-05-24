@@ -2,13 +2,12 @@
 Brother P-Touch P700 Driver
 """
 import io
-import random
 import struct
+import threading
 import time
 from collections import namedtuple
 from enum import Enum, IntEnum
-from itertools import chain, islice
-from pprint import pprint
+from itertools import islice
 from typing import Iterable, Sequence
 from math import ceil
 import logging
@@ -26,6 +25,14 @@ def batch_iter_bytes(b, size):
     i = iter(b)
 
     return iter(lambda: bytes(tuple(islice(i, size))), b"")
+
+
+def create_copies(b, size, copies):
+    result = list()
+    for i in range(copies):
+        result.append(batch_iter_bytes(b, size))
+
+    return result
 
 
 class INFO_OFFSETS(IntEnum):
@@ -171,6 +178,11 @@ class P700(BasePrinter):
     """Printer Class for the Brother P-Touch P700/PT-700 Printer"""
     DPI = (180, 180)
 
+    def __init__(self, io_obj: io.BufferedIOBase):
+        super().__init__(io_obj)
+        self.status = self.get_status()
+        self._check_print_status = False
+
     def connect(self) -> None:
         """Connect to Printer"""
         self.io.write(b'\x00' * 100)
@@ -201,13 +213,13 @@ class P700(BasePrinter):
     def get_label_width(self):
         return self.get_status().tape_info.width
 
-    def print_label(self, label: Label) -> Status:
-        status = self.get_status()
-        if not status.ready():
+    def print_label(self, label: Label, copies=1) -> Status:
+        self.status = self.get_status()
+        if not self.status.ready():
             raise IOError("Printer is not ready")
 
-        img = label.render(height=status.tape_info.printarea)
-        logger.debug("printarea is %s dots", status.tape_info.printarea)
+        img = label.render(height=self.status.tape_info.printarea)
+        logger.debug("printarea is %s dots", self.status.tape_info.printarea)
         if not img.mode == "1":
             raise ValueError("render output has invalid mode '1'")
         img = img.transpose(Image.ROTATE_270).transpose(
@@ -215,48 +227,121 @@ class P700(BasePrinter):
         img = ImageChops.invert(img)
 
         logger.info("label output size: %s", img.size)
-        logger.info("tape info: %s", status.tape_info)
+        logger.info("tape info: %s", self.status.tape_info)
 
         img_bytes = img.tobytes()
 
         with self.io.lock:
             self._raw_print(
-                status, batch_iter_bytes(img_bytes, ceil(img.size[0] / 8)))
-
-        # wait for label to finish printing
-        time.sleep(len(img_bytes)/1000 if len(img_bytes)/1000 > 5 else 5)
+                self.status, create_copies(img_bytes, ceil(img.size[0] / 8), copies))
 
         return self.get_status()
 
     def _dummy_print(self, status: Status, document: Iterable[bytes]) -> None:
         for line in document:
-            encode_line(line, status.tape_info)
+            print(b'G' + encode_line(line, status.tape_info))
+        print('------')
+        for line in document:
+            print(b'G' + encode_line(line, status.tape_info))
 
-    def _raw_print(self, status: Status, document: Iterable[bytes]) -> None:
+    def _print_status_check(self):
+        while self._check_print_status:
+            data = self.io.read(32)
+            if len(data) == 32:
+                self.status = Status(data)
+            time.sleep(0.1)
+
+    def _raw_print(self, status: Status, documents: list[Iterable[bytes]]) -> None:
         logger.info("starting print")
 
         self.connect()
+        self._check_print_status = True
 
-        # raster mode
-        self.io.write(b'\x1B\x69\x69\x01')
+        status_thread = threading.Thread(target=self._print_status_check)
+        status_thread.start()
 
-        # Various mode
-        self.io.write(b'\x1B\x69\x4D\x40')
+        try:
+            self.set_raster_mode()
+            self.set_various_mode()
+            self.set_advanced_mode()
+            self.set_margin(14)
+            self.set_compression_mode()
 
-        # Advanced mode
-        self.io.write(b'\x1B\x69\x4B\x08')
+            for i in range(len(documents)):
+                for line in documents[i]:
+                    self.io.write(b'G' + encode_line(line, status.tape_info))
 
-        # margin
-        self.io.write(b'\x1B\x69\x64\x0E\x00')
+                self.print_empty_row()
 
-        # Compression mode
-        self.io.write(b'\x4D\x02')
+                if i+1 < len(documents):
+                    self.next_page()
+                    end = time.time() + 20
+                    while True:
+                        if self.status.data.get('status_type') == 6 and self.status.data.get('phase_type') == 0:
+                            break
+                        time.sleep(0.1)
+                        if time.time() > end:
+                            raise TimeoutError("The printer did not reach receiving state for the next page")
 
-        for line in document:
-            self.io.write(b'G' + encode_line(line, status.tape_info))
+            # end page
+            self.last_page_end()
+            logger.info("end of page")
 
+            end = time.time() + 20
+            while True:
+                if self.status.data.get('status_type') == 1:
+                    break
+                time.sleep(0.1)
+                if time.time() > end:
+                    raise TimeoutError("The printer did not reach printing complete state")
+
+        finally:
+            self._check_print_status = False
+            status_thread.join()
+
+    def last_page_end(self):
+        self.io.write(b'\x1A')
+
+    def next_page(self):
+        self.io.write(b'\x0C')
+
+    def print_empty_row(self):
         self.io.write(b'\x5A')
 
-        # end page
-        self.io.write(b'\x1A')
-        logger.info("end of page")
+    def set_compression_mode(self, tiff=True):
+        data = b'\x4D' + self.build_byte({1: tiff})
+        self.io.write(data)
+
+    def set_margin(self, margin: int):
+        data = b'\x1B\x69\x64' + margin.to_bytes(2, 'little')
+        self.io.write(data)
+
+    def set_advanced_mode(self, no_chain_printing=True, special_tape=False, no_buffer_clearing=False):
+        """
+        No chain printing
+        When printing multiple copies, the labels are fed after the last one is printed.
+        1:No chain printing(Feeding and cutting are performed after the last one is printed.)
+        0:Chain printing(Feeding and cutting are not performed after the last one is printed.)
+        Special tape (no cutting)
+        Labels are not cut when special tape is installed.
+        1.Special tape (no cutting) ON 0:Special tape (no cutting) OFF
+        No buffer clearing when printing
+        The expansion buffer of the machine is not cleared with the “no buffer clearing when printing”
+        """
+        data = b'\x1B\x69\x4B' + self.build_byte({3: no_chain_printing, 4: special_tape, 7: no_buffer_clearing})
+        self.io.write(data)
+
+    def set_various_mode(self, cut=True, mirror=False):
+        """
+        Autocut 1.Automatically cuts 0.Does not automatically cut
+        Mirror printing 1. Mirror printing 0. No mirror printing
+        """
+        data = b'\x1B\x69\x4D' + self.build_byte({6: cut, 7: mirror})
+        self.io.write(data)
+
+    def set_raster_mode(self):
+        self.io.write(b'\x1B\x69\x61\x01')
+
+    @staticmethod
+    def build_byte(bits: dict):
+        return bytes([int(''.join([str(int(bits.get(i, 0))) for i in reversed(range(8))]), 2)])
